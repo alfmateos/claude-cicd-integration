@@ -1,6 +1,6 @@
 # ── .github/workflows/claude-ci.yml ──
-# DevSecOps pipeline using the official claude-code-action.
-# Stage 4 uses Claude to fix code, validate with tests, and commit to the PR.
+# DevSecOps pipeline with shift-left security + AI auto-remediation.
+# The auto-fix stage opens a NEW PR with fixes (never commits directly).
 
 name: Claude DevSecOps Pipeline
 
@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   # ════════════════════════════════════════════════
-  # STAGE 1: Tests (always runs)
+  # STAGE 1: Tests
   # ════════════════════════════════════════════════
   test:
     runs-on: ubuntu-latest
@@ -36,70 +36,58 @@ jobs:
         run: python -m pytest tests/ -v
 
   # ════════════════════════════════════════════════
-  # STAGE 2: Security scanning (3 parallel jobs)
+  # STAGE 2: Security scanning (parallel)
   # ════════════════════════════════════════════════
 
-  # ── 2a. SAST ──
   sast-bandit:
     runs-on: ubuntu-latest
     needs: test
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Run Bandit SAST scan
         run: |
           pip install bandit
           bandit -r src/ -f json -o bandit-report.json --exit-zero
           bandit -r src/ -f screen || true
-
       - uses: actions/upload-artifact@v4
         with:
           name: bandit-sast-report
           path: bandit-report.json
 
-  # ── 2b. SCA ──
   sca-pip-audit:
     runs-on: ubuntu-latest
     needs: test
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Run pip-audit SCA scan
         run: |
           pip install pip-audit
           pip install -r requirements.txt
           pip-audit --format=json --output=pip-audit-report.json || true
           pip-audit || true
-
       - uses: actions/upload-artifact@v4
         with:
           name: pip-audit-sca-report
           path: pip-audit-report.json
 
-  # ── 2c. Secret scanning ──
   secret-scan:
     runs-on: ubuntu-latest
     needs: test
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Run secret scan
         run: |
           pip install detect-secrets
           detect-secrets scan --all-files --force-use-all-plugins > secrets-report.json
-
           SECRETS_COUNT=$(python3 -c "
           import json
           with open('secrets-report.json') as f:
@@ -114,20 +102,21 @@ jobs:
           if [ "$SECRETS_COUNT" -gt 0 ]; then
             echo "::warning::Found $SECRETS_COUNT potential secrets in code!"
           fi
-
       - uses: actions/upload-artifact@v4
         with:
           name: secrets-scan-report
           path: secrets-report.json
 
   # ════════════════════════════════════════════════
-  # STAGE 3: AI security review (reads all scan reports)
-  # Uses claude-code-action with structured JSON output
+  # STAGE 3: AI security review (comments on PR)
+  # Skips if triggered by a bot (prevents loops)
   # ════════════════════════════════════════════════
   ai-code-review:
     runs-on: ubuntu-latest
     needs: [sast-bandit, sca-pip-audit, secret-scan]
-    if: github.event_name == 'pull_request'
+    if: |
+      github.event_name == 'pull_request' &&
+      github.actor != 'claude[bot]'
     steps:
       - uses: actions/checkout@v4
 
@@ -135,19 +124,16 @@ jobs:
         with:
           name: bandit-sast-report
           path: reports/
-
       - uses: actions/download-artifact@v4
         with:
           name: pip-audit-sca-report
           path: reports/
-
       - uses: actions/download-artifact@v4
         with:
           name: secrets-scan-report
           path: reports/
 
       - name: AI security review
-        id: review
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -173,13 +159,16 @@ jobs:
             --allowedTools Read,Bash(cat:*),Bash(jq:*)
 
   # ════════════════════════════════════════════════
-  # STAGE 4: AI auto-fix + test + commit
-  # Claude edits files, pytest validates, commit if green
+  # STAGE 4: AI auto-fix → opens a NEW PR
+  # Claude creates a branch, fixes code, runs tests,
+  # and opens a PR targeting YOUR branch for review.
   # ════════════════════════════════════════════════
   ai-auto-fix:
     runs-on: ubuntu-latest
     needs: ai-code-review
-    if: github.event_name == 'pull_request'
+    if: |
+      github.event_name == 'pull_request' &&
+      github.actor != 'claude[bot]'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -197,12 +186,10 @@ jobs:
         with:
           name: bandit-sast-report
           path: reports/
-
       - uses: actions/download-artifact@v4
         with:
           name: pip-audit-sca-report
           path: reports/
-
       - uses: actions/download-artifact@v4
         with:
           name: secrets-scan-report
@@ -212,8 +199,10 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Claude will create a branch from your PR branch
+          base_branch: ${{ github.head_ref }}
           prompt: |
-            You are a senior security engineer. Your job is to FIX code issues.
+            You are a senior security engineer. Fix the code issues found.
 
             1. Read the security scan reports in reports/:
                - bandit-report.json (SAST findings)
@@ -221,7 +210,7 @@ jobs:
                - secrets-report.json (leaked secrets)
             2. Read the source code in src/ and tests/
 
-            For each real issue found, EDIT the actual files to fix them:
+            For each real issue found, EDIT the actual files:
             - Fix security vulnerabilities in src/
             - Add edge-case tests in tests/
             - Update requirements.txt if deps need upgrading
@@ -234,46 +223,11 @@ jobs:
             - Keep all existing tests passing
 
             After fixing, run: python -m pytest tests/ -v
-            If tests fail, revert your changes and try a different approach.
+            If tests fail, revert and try a different approach.
             Only leave changes that pass all tests.
+
+            When done, create a commit with a clear message describing
+            what was fixed and why.
           claude_args: |
             --max-turns 15
-            --allowedTools Read,Write,Edit,Bash(python:*),Bash(pip:*),Bash(cat:*),Bash(pytest:*)
-
-      # Commit only if there are actual changes and tests pass
-      - name: Validate and commit fixes
-        run: |
-          # Final safety check: run tests one more time
-          if ! python -m pytest tests/ -v; then
-            echo "::warning::Tests failing after AI fixes — reverting all changes"
-            git checkout -- .
-            exit 0
-          fi
-
-          # Check if Claude made any changes
-          if git diff --quiet && git diff --cached --quiet; then
-            echo "No changes to commit — code was already clean"
-            exit 0
-          fi
-
-          git config user.name "claude[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add -A
-          git reset -- reports/ .github/
-
-          if git diff --cached --quiet; then
-            echo "No relevant changes after filtering"
-            exit 0
-          fi
-
-          git commit -m "fix(security): auto-fix from DevSecOps pipeline
-
-          Applied automated fixes based on Bandit, pip-audit,
-          and detect-secrets scan results.
-
-          All tests verified passing before commit.
-          Co-authored-by: Claude <claude[bot]@users.noreply.github.com>"
-
-          git push
-          echo "✅ Security fixes committed to PR branch"
+            --allowedTools Read,Write,Edit,Bash(python:*),Bash(pip:*),Bash(pytest:*),Bash(cat:*),Bash(git:*)

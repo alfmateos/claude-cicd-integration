@@ -37,3 +37,7 @@ def sqrt(n: float) -> float:
 def tangent(x: float) -> float:
     """Calculate tangent of an angle in radians."""
     return math.tan(x)
+
+def sin(x: float) -> float:
+    """Calculate sine of an angle in radians."""
+    return math.sin(x)

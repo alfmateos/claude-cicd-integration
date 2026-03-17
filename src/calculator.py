@@ -41,3 +41,5 @@ def tangent(x: float) -> float:
 def sin(x: float) -> float:
     """Calculate sine of an angle in radians."""
     return math.sin(x)
+
+

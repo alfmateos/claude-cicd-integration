@@ -26,3 +26,9 @@ def factorial(n: int) -> int:
     if n <= 1:
         return 1
     return n * factorial(n - 1)
+
+def sqrt(n: float) -> float:
+    """Calculate square root of a non-negative number."""
+    if n < 0:
+        raise ValueError("Input must be a non-negative number")
+    return n ** 0.5

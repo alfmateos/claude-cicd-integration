@@ -1,0 +1,18 @@
+# ── Claude Code CI runner ──
+# Lightweight image with Node 22 + Python for running
+# Claude Code headless against a Python project.
+FROM node:22-alpine
+
+# Install Python + pip (needed to run pytest in the project)
+RUN apk add --no-cache python3 py3-pip git
+
+# Install Claude Code CLI globally
+RUN npm install -g @anthropic-ai/claude-code
+
+WORKDIR /workspace
+COPY . .
+
+# Install Python deps so Claude can invoke pytest
+RUN pip install --break-system-packages -r requirements.txt
+
+ENTRYPOINT ["claude"]

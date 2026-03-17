@@ -1,0 +1,55 @@
+# ── Local CI/CD pipeline using Claude Code in headless mode ──
+# Run:  docker compose up --build
+# Requires: ANTHROPIC_API_KEY in .env file
+
+services:
+
+  # ── Stage 1: Run existing tests ──
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.claude-ci
+    entrypoint: ["python", "-m", "pytest", "tests/", "-v"]
+    volumes:
+      - ./src:/workspace/src:ro
+      - ./tests:/workspace/tests:ro
+
+  # ── Stage 2: AI code review ──
+  code-review:
+    build:
+      context: .
+      dockerfile: Dockerfile.claude-ci
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    volumes:
+      - ./src:/workspace/src:ro
+    command: >
+      -p "Review the Python code in /workspace/src/.
+      Focus on bugs, security issues, and style.
+      Output a short JSON summary with fields:
+      issues (array of {file, line, severity, message}), overall_quality (1-10)."
+      --output-format json
+      --max-turns 3
+    depends_on:
+      test:
+        condition: service_completed_successfully
+
+  # ── Stage 3: AI-generated suggestions ──
+  suggestions:
+    build:
+      context: .
+      dockerfile: Dockerfile.claude-ci
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    volumes:
+      - ./src:/workspace/src:ro
+      - ./tests:/workspace/tests:ro
+    command: >
+      -p "Read /workspace/src/calculator.py and /workspace/tests/test_calculator.py.
+      Suggest 3 additional edge-case tests that are missing.
+      Output each as a pytest function in plain text."
+      --output-format text
+      --max-turns 3
+    depends_on:
+      code-review:
+        condition: service_completed_successfully

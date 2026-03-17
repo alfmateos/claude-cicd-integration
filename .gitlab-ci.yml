@@ -1,0 +1,62 @@
+# ── .gitlab-ci.yml ──
+# Same pipeline logic, for GitLab CI/CD.
+# Free tier: 400 compute minutes/month (public repos unlimited on GitHub).
+
+stages:
+  - test
+  - review
+  - suggest
+
+# ── Stage 1: Run tests ──
+test:
+  stage: test
+  image: python:3.12-slim
+  script:
+    - pip install -r requirements.txt
+    - python -m pytest tests/ -v
+
+# ── Stage 2: AI code review ──
+code-review:
+  stage: review
+  image: node:22-alpine
+  before_script:
+    - npm install -g @anthropic-ai/claude-code
+  script:
+    - |
+      claude -p "Review the Python code in src/.
+        Focus on bugs, security issues, and style.
+        Output a short JSON summary with fields:
+        issues (array of {file, line, severity, message}),
+        overall_quality (1-10)." \
+        --output-format json \
+        --max-turns 3 \
+        | tee review-results.json
+  artifacts:
+    paths:
+      - review-results.json
+  variables:
+    ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY   # Set in GitLab CI/CD Settings → Variables
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# ── Stage 3: AI test suggestions ──
+suggestions:
+  stage: suggest
+  image: node:22-alpine
+  before_script:
+    - npm install -g @anthropic-ai/claude-code
+  script:
+    - |
+      claude -p "Read src/calculator.py and tests/test_calculator.py.
+        Suggest 3 additional edge-case tests that are missing.
+        Output each as a pytest function in plain text." \
+        --output-format text \
+        --max-turns 3 \
+        | tee suggestions.txt
+  artifacts:
+    paths:
+      - suggestions.txt
+  variables:
+    ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"

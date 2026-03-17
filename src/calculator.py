@@ -1,4 +1,5 @@
 """A simple calculator module used as a demo for Claude Code CI/CD."""
+import math
 
 
 def add(a: float, b: float) -> float:
@@ -32,3 +33,11 @@ def sqrt(n: float) -> float:
     if n < 0:
         raise ValueError("Input must be a non-negative number")
     return n ** 0.5
+
+def tangent(x: float) -> float:
+    """Calculate tangent of an angle in radians."""
+    return math.tan(x)
+
+def sin(x: float) -> float:
+    """Calculate sine of an angle in radians."""
+    return math.sin(x)

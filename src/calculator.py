@@ -24,9 +24,10 @@ def factorial(n: int) -> int:
     """Calculate factorial of a non-negative integer."""
     if not isinstance(n, int) or n < 0:
         raise ValueError("Input must be a non-negative integer")
-    if n <= 1:
-        return 1
-    return n * factorial(n - 1)
+    result = 1
+    for i in range(2, n + 1):
+        result *= i
+    return result
 
 def sqrt(n: float) -> float:
     """Calculate square root of a non-negative number."""
@@ -42,5 +43,3 @@ def sin(x: float) -> float:
     """Calculate sine of an angle in radians."""
     return math.sin(x)
 
-
-# trigger

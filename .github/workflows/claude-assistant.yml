@@ -1,7 +1,6 @@
 # ── .github/workflows/claude-assistant.yml ──
-# Interactive AI assistant: mention @claude in any PR or issue comment
-# and Claude responds with answers, code changes, or reviews.
-# This is SEPARATE from the DevSecOps pipeline (claude-ci.yml).
+# Interactive AI assistant: mention @claude in any PR or issue comment.
+# When asked to change code, Claude opens a NEW PR for human review.
 
 name: Claude Assistant
 
@@ -22,9 +21,13 @@ permissions:
 jobs:
   claude:
     runs-on: ubuntu-latest
-    # Only run when someone mentions @claude
+    # Only trigger for @claude mentions, never for bot comments
     if: |
-      contains(github.event.comment.body || github.event.issue.body, '@claude')
+      (
+        contains(github.event.comment.body || '', '@claude') ||
+        contains(github.event.issue.body || '', '@claude')
+      ) &&
+      github.event.sender.type != 'Bot'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,7 +43,6 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Claude can read, write, edit code and run python/pytest
           claude_args: |
             --max-turns 15
-            --allowedTools Read,Write,Edit,Bash(python:*),Bash(pip:*),Bash(pytest:*),Bash(cat:*),Bash(git diff:*),Bash(git log:*)
+            --allowedTools Read,Write,Edit,Bash(python:*),Bash(pip:*),Bash(pytest:*),Bash(cat:*),Bash(git:*)
